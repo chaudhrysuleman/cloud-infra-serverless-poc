@@ -1,3 +1,360 @@
 name: cloud-infra-poc
-runtime: python
-description: AWS Event-Driven Parcels Order System Infrastructure via Pulumi
+runtime: yaml
+description: AWS Event-Driven Parcels Order System Infrastructure via Pulumi YAML
+
+variables:
+  dbPassword: "SecurePass123!"
+
+resources:
+  # ==========================================
+  # 1. NETWORKING (VPC, Subnets, Gateway)
+  # ==========================================
+  vpc:
+    type: aws:ec2:Vpc
+    properties:
+      cidrBlock: 10.0.0.0/16
+      enableDnsHostnames: true
+      enableDnsSupport: true
+      tags:
+        Name: poc-custom-vpc
+
+  igw:
+    type: aws:ec2:InternetGateway
+    properties:
+      vpcId: ${vpc.id}
+      tags:
+        Name: poc-igw
+
+  publicSubnet:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${vpc.id}
+      cidrBlock: 10.0.1.0/24
+      mapPublicIpOnLaunch: true
+      availabilityZone: eu-north-1a
+      tags:
+        Name: poc-public-subnet
+
+  privateSubnet1:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${vpc.id}
+      cidrBlock: 10.0.2.0/24
+      availabilityZone: eu-north-1a
+      tags:
+        Name: poc-private-subnet-1
+
+  privateSubnet2:
+    type: aws:ec2:Subnet
+    properties:
+      vpcId: ${vpc.id}
+      cidrBlock: 10.0.3.0/24
+      availabilityZone: eu-north-1b
+      tags:
+        Name: poc-private-subnet-2
+
+  publicRt:
+    type: aws:ec2:RouteTable
+    properties:
+      vpcId: ${vpc.id}
+      routes:
+        - cidrBlock: 0.0.0.0/0
+          gatewayId: ${igw.id}
+      tags:
+        Name: poc-public-route-table
+
+  publicRtAssoc:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${publicSubnet.id}
+      routeTableId: ${publicRt.id}
+
+  # ==========================================
+  # 2. SECURITY GROUPS (Firewalls)
+  # ==========================================
+  ec2Sg:
+    type: aws:ec2:SecurityGroup
+    properties:
+      vpcId: ${vpc.id}
+      description: Security group for application EC2 host
+      ingress:
+        - protocol: tcp
+          fromPort: 80
+          toPort: 80
+          cidrBlocks: ["0.0.0.0/0"]
+          description: Allow HTTP public traffic
+        - protocol: tcp
+          fromPort: 22
+          toPort: 22
+          cidrBlocks: ["0.0.0.0/0"]
+          description: Allow SSH access
+      egress:
+        - protocol: "-1"
+          fromPort: 0
+          toPort: 0
+          cidrBlocks: ["0.0.0.0/0"]
+          description: Allow all outbound traffic
+      tags:
+        Name: poc-ec2-security-group
+
+  rdsSg:
+    type: aws:ec2:SecurityGroup
+    properties:
+      vpcId: ${vpc.id}
+      description: Security group for private PostgreSQL database
+      ingress:
+        - protocol: tcp
+          fromPort: 5432
+          toPort: 5432
+          securityGroups: [${ec2Sg.id}]
+          description: Allow connections from EC2 app server only
+      egress:
+        - protocol: "-1"
+          fromPort: 0
+          toPort: 0
+          cidrBlocks: ["0.0.0.0/0"]
+      tags:
+        Name: poc-rds-security-group
+
+  # ==========================================
+  # 3. STORAGE & MESSAGING (S3, SNS, SQS)
+  # ==========================================
+  invoicesBucket:
+    type: aws:s3:BucketV2
+    properties:
+      bucket: suleman-parcels-invoices-930501832739
+      forceDestroy: true
+      tags:
+        Name: poc-parcels-invoices
+
+  invoicesBucketOwnership:
+    type: aws:s3:BucketOwnershipControls
+    properties:
+      bucket: ${invoicesBucket.id}
+      rule:
+        objectOwnership: BucketOwnerPreferred
+
+  invoicesBucketPublicBlock:
+    type: aws:s3:BucketPublicAccessBlock
+    properties:
+      bucket: ${invoicesBucket.id}
+      blockPublicAcls: true
+      blockPublicPolicy: true
+      ignorePublicAcls: true
+      restrictPublicBuckets: true
+
+  snsTopic:
+    type: aws:sns:Topic
+    properties:
+      name: order-placed-topic
+
+  notificationQueue:
+    type: aws:sqs:Queue
+    properties:
+      name: notification-queue
+      messageRetentionSeconds: 86400
+
+  invoiceQueue:
+    type: aws:sqs:Queue
+    properties:
+      name: invoice-queue
+      messageRetentionSeconds: 86400
+
+  deliveryQueue:
+    type: aws:sqs:Queue
+    properties:
+      name: delivery-queue
+      messageRetentionSeconds: 86400
+
+  subNotification:
+    type: aws:sns:TopicSubscription
+    properties:
+      topic: ${snsTopic.arn}
+      protocol: sqs
+      endpoint: ${notificationQueue.arn}
+
+  subInvoice:
+    type: aws:sns:TopicSubscription
+    properties:
+      topic: ${snsTopic.arn}
+      protocol: sqs
+      endpoint: ${invoiceQueue.arn}
+
+  subDelivery:
+    type: aws:sns:TopicSubscription
+    properties:
+      topic: ${snsTopic.arn}
+      protocol: sqs
+      endpoint: ${deliveryQueue.arn}
+
+  policyNotification:
+    type: aws:sqs:QueuePolicy
+    properties:
+      queueUrl: ${notificationQueue.id}
+      policy:
+        fn::toJSON:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: sqs:SendMessage
+              Resource: ${notificationQueue.arn}
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: ${snsTopic.arn}
+
+  policyInvoice:
+    type: aws:sqs:QueuePolicy
+    properties:
+      queueUrl: ${invoiceQueue.id}
+      policy:
+        fn::toJSON:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: sqs:SendMessage
+              Resource: ${invoiceQueue.arn}
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: ${snsTopic.arn}
+
+  policyDelivery:
+    type: aws:sqs:QueuePolicy
+    properties:
+      queueUrl: ${deliveryQueue.id}
+      policy:
+        fn::toJSON:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: sqs:SendMessage
+              Resource: ${deliveryQueue.arn}
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: ${snsTopic.arn}
+
+  # ==========================================
+  # 4. IAM ROLES (EC2 Service Profile)
+  # ==========================================
+  ec2Role:
+    type: aws:iam:Role
+    properties:
+      name: poc-ec2-role
+      assumeRolePolicy:
+        fn::toJSON:
+          Version: "2012-10-17"
+          Statement:
+            - Action: sts:AssumeRole
+              Effect: Allow
+              Principal:
+                Service: ec2.amazonaws.com
+
+  ec2RolePolicy:
+    type: aws:iam:RolePolicy
+    properties:
+      role: ${ec2Role.id}
+      name: poc-ec2-policy
+      policy:
+        fn::toJSON:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: ["s3:*"]
+              Resource: [${invoicesBucket.arn}, "${invoicesBucket.arn}/*"]
+            - Effect: Allow
+              Action: ["sns:Publish"]
+              Resource: [${snsTopic.arn}]
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:GetQueueUrl
+              Resource:
+                - ${notificationQueue.arn}
+                - ${invoiceQueue.arn}
+                - ${deliveryQueue.arn}
+
+  ec2InstanceProfile:
+    type: aws:iam:InstanceProfile
+    properties:
+      name: poc-ec2-instance-profile
+      role: ${ec2Role.name}
+
+  # ==========================================
+  # 5. DATABASES (PostgreSQL RDS)
+  # ==========================================
+  rdsSubnetGroup:
+    type: aws:rds:SubnetGroup
+    properties:
+      name: poc-rds-subnet-group
+      subnetIds: [${privateSubnet1.id}, ${privateSubnet2.id}]
+      tags:
+        Name: poc-rds-subnet-group
+
+  postgresDb:
+    type: aws:rds:Instance
+    properties:
+      identifier: poc-postgres-db
+      engine: postgres
+      engineVersion: "15"
+      instanceClass: db.t3.micro
+      allocatedStorage: 20
+      dbName: postgres
+      username: dbadmin
+      password: ${dbPassword}
+      dbSubnetGroupName: ${rdsSubnetGroup.name}
+      vpcSecurityGroupIds: [${rdsSg.id}]
+      skipFinalSnapshot: true
+      tags:
+        Name: poc-postgres-database
+
+  # ==========================================
+  # 6. COMPUTE (EC2 Instance)
+  # ==========================================
+  sshKey:
+    type: aws:ec2:KeyPair
+    properties:
+      keyName: poc-ssh-key
+      publicKey:
+        fn::file: ~/.ssh/id_ed25519_github.pub
+
+  webHost:
+    type: aws:ec2:Instance
+    properties:
+      instanceType: t3.micro
+      ami:
+        fn::invoke:
+          function: aws:ec2:getAmi
+          arguments:
+            mostRecent: true
+            filters:
+              - name: name
+                values: ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+              - name: virtualization-type
+                values: ["hvm"]
+            owners: ["099720109477"]
+          return: id
+      subnetId: ${publicSubnet.id}
+      vpcSecurityGroupIds: [${ec2Sg.id}]
+      keyName: ${sshKey.keyName}
+      iamInstanceProfile: ${ec2InstanceProfile.name}
+      userData: |
+        #!/bin/bash
+        apt-get update -y
+        apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+        add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+        apt-get update -y
+        apt-get install -y docker-ce
+        systemctl start docker
+        systemctl enable docker
+      tags:
+        Name: poc-ec2-instance
+
+outputs:
+  ec2_public_ip: ${webHost.publicIp}
+  ec2_url: http://${webHost.publicIp}
+  rds_endpoint: ${postgresDb.endpoint}

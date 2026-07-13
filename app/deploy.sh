@@ -10,7 +10,6 @@ fi
 if [ "$USE_PULUMI" = true ]; then
     echo "🌐 Step 1: Running Pulumi Up to provision cloud infrastructure..."
     cd ../pulumi
-    source venv/bin/activate
     export PULUMI_CONFIG_PASSPHRASE="SecurePass123!"
     ~/.pulumi/bin/pulumi up --yes
     
