@@ -174,20 +174,26 @@ To deploy the infrastructure and application to AWS:
 5. Once complete, copy the output values (especially `ec2_public_ip` and `rds_endpoint`).
 
 #### Deploying the Application
-To deploy the infrastructure and application to AWS, we use a fully automated orchestration script `deploy.sh` that provisions the cloud resources, extracts endpoints, compiles the Java code, and runs the container on EC2:
+To deploy the infrastructure and application to AWS, we use a fully automated orchestration script `deploy.sh` that provisions the cloud resources using either **Terraform** or **Pulumi**, extracts endpoints, compiles the Java code, and runs the container on EC2:
 
 1. Make sure you have configured your AWS CLI credentials (see Prerequisites above).
 2. Navigate to the `app/` directory:
    ```bash
    cd app
    ```
-3. Run the unified deployment script:
-   ```bash
-   chmod +x deploy.sh
-   ./deploy.sh
-   ```
+3. Choose your preferred Infrastructure as Code (IaC) tool and run the deployment:
+   * **To deploy via Terraform (Default):**
+     ```bash
+     chmod +x deploy.sh
+     ./deploy.sh
+     ```
+   * **To deploy via Pulumi:**
+     ```bash
+     chmod +x deploy.sh
+     ./deploy.sh --pulumi
+     ```
 4. The script will automatically:
-   * Run `terraform apply` to spin up all 29 AWS resources.
+   * Provision/update the cloud infrastructure via Terraform or Pulumi.
    * Dynamically query the newly generated EC2 IP, RDS host, and S3 bucket details.
    * Write and synchronize these values to your local `.env` configuration file.
    * Compile your Java Spring Boot application into a JAR.
@@ -199,12 +205,26 @@ To deploy the infrastructure and application to AWS, we use a fully automated or
 
 ## 🧹 Cleaning Up Resources
 To destroy all created resources and avoid any unexpected cloud charges:
-1. Navigate to the `terraform/` directory:
-   ```bash
-   cd terraform
-   ```
-2. Run the destroy command:
-   ```bash
-   terraform destroy
-   ```
-3. Type `yes` to confirm.
+
+* **If deployed via Terraform (Default):**
+  1. Navigate to the `terraform/` directory:
+     ```bash
+     cd terraform
+     ```
+  2. Run the destroy command (confirm with `yes`):
+     ```bash
+     terraform destroy
+     ```
+
+* **If deployed via Pulumi:**
+  1. Navigate to the `pulumi/` directory:
+     ```bash
+     cd pulumi
+     ```
+  2. Run the destroy command (confirm with `yes`):
+     ```bash
+     source venv/bin/activate
+     export PULUMI_CONFIG_PASSPHRASE="SecurePass123!"
+     pulumi destroy --yes
+     ```
+  3. Type `yes` to confirm.
