@@ -223,8 +223,6 @@ To destroy all created resources and avoid any unexpected cloud charges:
      ```
   2. Run the destroy command (confirm with `yes`):
      ```bash
-     source venv/bin/activate
      export PULUMI_CONFIG_PASSPHRASE="SecurePass123!"
      pulumi destroy --yes
      ```
-  3. Type `yes` to confirm.
