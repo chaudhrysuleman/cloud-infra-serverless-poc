@@ -1,0 +1,3 @@
+name: cloud-infra-poc
+runtime: python
+description: AWS Event-Driven Parcels Order System Infrastructure via Pulumi
