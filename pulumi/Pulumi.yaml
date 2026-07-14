@@ -418,8 +418,9 @@ resources:
   apiLambda:
     type: aws:lambda:Function
     properties:
-      code: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
-      functionName: poc-api-lambda
+      code:
+        fn::fileArchive: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      name: poc-api-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.StreamLambdaHandler::handleRequest
       runtime: java17
@@ -436,12 +437,7 @@ resources:
           - ${lambdaSg.id}
       environment:
         variables:
-          DB_HOST:
-            fn::split:
-              - ":"
-              - ${postgresDb.endpoint}
-            fn::select:
-              - 0
+          DB_HOST: ${postgresDb.address}
           DB_PORT: "5432"
           DB_NAME: postgres
           DB_USER: dbadmin
@@ -450,11 +446,13 @@ resources:
           SNS_TOPIC_ARN: ${snsTopic.arn}
           S3_BUCKET: ${invoicesBucket.id}
 
+
   sqsLambda:
     type: aws:lambda:Function
     properties:
-      code: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
-      functionName: poc-sqs-lambda
+      code:
+        fn::fileArchive: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      name: poc-sqs-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.SqsLambdaHandler::handleRequest
       runtime: java17
@@ -471,12 +469,7 @@ resources:
           - ${lambdaSg.id}
       environment:
         variables:
-          DB_HOST:
-            fn::split:
-              - ":"
-              - ${postgresDb.endpoint}
-            fn::select:
-              - 0
+          DB_HOST: ${postgresDb.address}
           DB_PORT: "5432"
           DB_NAME: postgres
           DB_USER: dbadmin
