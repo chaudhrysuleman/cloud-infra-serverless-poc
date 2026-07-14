@@ -94,7 +94,6 @@ resource "aws_lambda_function" "api" {
       DB_NAME       = var.db_name
       DB_USER       = var.db_username
       DB_PASSWORD   = var.db_password
-      AWS_REGION    = var.aws_region
       SNS_TOPIC_ARN = aws_sns_topic.order_placed.arn
       S3_BUCKET     = aws_s3_bucket.invoices.id
     }
@@ -137,7 +136,6 @@ resource "aws_lambda_function" "sqs" {
       DB_NAME       = var.db_name
       DB_USER       = var.db_username
       DB_PASSWORD   = var.db_password
-      AWS_REGION    = var.aws_region
       SNS_TOPIC_ARN = aws_sns_topic.order_placed.arn
       S3_BUCKET     = aws_s3_bucket.invoices.id
     }

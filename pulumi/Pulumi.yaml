@@ -450,7 +450,6 @@ resources:
           DB_NAME: postgres
           DB_USER: dbadmin
           DB_PASSWORD: ${dbPassword}
-          AWS_REGION: eu-north-1
           SNS_TOPIC_ARN: ${snsTopic.arn}
           S3_BUCKET: ${invoicesBucket.id}
 
@@ -482,7 +481,6 @@ resources:
           DB_NAME: postgres
           DB_USER: dbadmin
           DB_PASSWORD: ${dbPassword}
-          AWS_REGION: eu-north-1
           SNS_TOPIC_ARN: ${snsTopic.arn}
           S3_BUCKET: ${invoicesBucket.id}
 
