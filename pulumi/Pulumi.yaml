@@ -235,6 +235,14 @@ resources:
       ignorePublicAcls: true
       restrictPublicBuckets: true
 
+  lambdaJar:
+    type: aws:s3:BucketObjectv2
+    properties:
+      bucket: ${invoicesBucket.id}
+      key: cloud-infra-poc-lambda.jar
+      source:
+        fn::fileAsset: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+
   snsTopic:
     type: aws:sns:Topic
     properties:
@@ -418,8 +426,8 @@ resources:
   apiLambda:
     type: aws:lambda:Function
     properties:
-      code:
-        fn::fileArchive: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      s3Bucket: ${invoicesBucket.id}
+      s3Key: ${lambdaJar.key}
       name: poc-api-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.StreamLambdaHandler::handleRequest
@@ -450,8 +458,8 @@ resources:
   sqsLambda:
     type: aws:lambda:Function
     properties:
-      code:
-        fn::fileArchive: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      s3Bucket: ${invoicesBucket.id}
+      s3Key: ${lambdaJar.key}
       name: poc-sqs-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.SqsLambdaHandler::handleRequest

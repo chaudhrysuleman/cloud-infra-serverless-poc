@@ -57,10 +57,20 @@ resource "aws_vpc_endpoint" "sns" {
   }
 }
 
+# --- S3 Object for Lambda deployment package ---
+resource "aws_s3_object" "lambda_jar" {
+  bucket = aws_s3_bucket.invoices.id
+  key    = "cloud-infra-poc-lambda.jar"
+  source = "${path.module}/../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar"
+  etag   = filemd5("${path.module}/../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar")
+}
+
 # --- AWS Lambda Function: API (REST endpoints) ---
 resource "aws_lambda_function" "api" {
-  filename      = "${path.module}/../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar"
-  function_name = "poc-api-lambda"
+  s3_bucket        = aws_s3_bucket.invoices.id
+  s3_key           = aws_s3_object.lambda_jar.key
+  source_code_hash = aws_s3_object.lambda_jar.etag
+  function_name    = "poc-api-lambda"
   role          = aws_iam_role.lambda.arn
   handler       = "com.suleman.poc.StreamLambdaHandler::handleRequest"
   runtime       = "java17"
@@ -100,8 +110,10 @@ resource "aws_lambda_function" "api" {
 
 # --- AWS Lambda Function: SQS Consumers ---
 resource "aws_lambda_function" "sqs" {
-  filename      = "${path.module}/../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar"
-  function_name = "poc-sqs-lambda"
+  s3_bucket        = aws_s3_bucket.invoices.id
+  s3_key           = aws_s3_object.lambda_jar.key
+  source_code_hash = aws_s3_object.lambda_jar.etag
+  function_name    = "poc-sqs-lambda"
   role          = aws_iam_role.lambda.arn
   handler       = "com.suleman.poc.SqsLambdaHandler::handleRequest"
   runtime       = "java17"
