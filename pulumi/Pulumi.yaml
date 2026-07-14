@@ -516,7 +516,7 @@ resources:
       apiId: ${apiGateway.id}
       integrationType: AWS_PROXY
       integrationUri: ${apiLambda.qualifiedArn}
-      payloadFormatVersion: "2.0"
+      payloadFormatVersion: "1.0"
 
   apiGatewayRouteAny:
     type: aws:apigatewayv2:Route
