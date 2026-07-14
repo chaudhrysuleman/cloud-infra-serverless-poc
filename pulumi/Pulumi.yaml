@@ -1,6 +1,6 @@
 name: cloud-infra-poc
 runtime: yaml
-description: AWS Event-Driven Parcels Order System Infrastructure via Pulumi YAML
+description: AWS Event-Driven Parcels Order System Infrastructure via Pulumi YAML (Serverless version)
 
 variables:
   dbPassword: "SecurePass123!"
@@ -35,7 +35,6 @@ resources:
       tags:
         Name: poc-public-subnet
 
-  # Second public subnet in eu-north-1b for multi-AZ ALB support
   publicSubnet2:
     type: aws:ec2:Subnet
     properties:
@@ -45,12 +44,6 @@ resources:
       availabilityZone: eu-north-1b
       tags:
         Name: poc-public-subnet-2
-
-  publicRtAssoc2:
-    type: aws:ec2:RouteTableAssociation
-    properties:
-      subnetId: ${publicSubnet2.id}
-      routeTableId: ${publicRt.id}
 
   privateSubnet1:
     type: aws:ec2:Subnet
@@ -86,57 +79,50 @@ resources:
       subnetId: ${publicSubnet.id}
       routeTableId: ${publicRt.id}
 
+  publicRtAssoc2:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${publicSubnet2.id}
+      routeTableId: ${publicRt.id}
+
+  privateRt:
+    type: aws:ec2:RouteTable
+    properties:
+      vpcId: ${vpc.id}
+      tags:
+        Name: poc-private-route-table
+
+  privateRtAssoc1:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${privateSubnet1.id}
+      routeTableId: ${privateRt.id}
+
+  privateRtAssoc2:
+    type: aws:ec2:RouteTableAssociation
+    properties:
+      subnetId: ${privateSubnet2.id}
+      routeTableId: ${privateRt.id}
+
   # ==========================================
   # 2. SECURITY GROUPS (Firewalls)
   # ==========================================
 
-  # ALB security group: accepts HTTP from the public internet
-  albSg:
+  # Lambda security group
+  lambdaSg:
     type: aws:ec2:SecurityGroup
     properties:
       vpcId: ${vpc.id}
-      description: Security group for the Application Load Balancer
-      ingress:
-        - protocol: tcp
-          fromPort: 80
-          toPort: 80
-          cidrBlocks: ["0.0.0.0/0"]
-          description: Allow HTTP from internet
+      description: Security group for Lambda functions
       egress:
         - protocol: "-1"
           fromPort: 0
           toPort: 0
           cidrBlocks: ["0.0.0.0/0"]
       tags:
-        Name: poc-alb-security-group
+        Name: poc-lambda-security-group
 
-  # EC2 security group: port 80 now locked to traffic from the ALB only
-  ec2Sg:
-    type: aws:ec2:SecurityGroup
-    properties:
-      vpcId: ${vpc.id}
-      description: Security group for application EC2 host
-      ingress:
-        - protocol: tcp
-          fromPort: 80
-          toPort: 80
-          securityGroups:
-            - ${albSg.id}
-          description: Allow HTTP from ALB only
-        - protocol: tcp
-          fromPort: 22
-          toPort: 22
-          cidrBlocks: ["0.0.0.0/0"]
-          description: Allow SSH access
-      egress:
-        - protocol: "-1"
-          fromPort: 0
-          toPort: 0
-          cidrBlocks: ["0.0.0.0/0"]
-          description: Allow all outbound traffic
-      tags:
-        Name: poc-ec2-security-group
-
+  # RDS security group
   rdsSg:
     type: aws:ec2:SecurityGroup
     properties:
@@ -147,8 +133,8 @@ resources:
           fromPort: 5432
           toPort: 5432
           securityGroups:
-            - ${ec2Sg.id}
-          description: Allow connections from EC2 app server only
+            - ${lambdaSg.id}
+          description: Allow connections from Lambda functions only
       egress:
         - protocol: "-1"
           fromPort: 0
@@ -157,8 +143,73 @@ resources:
       tags:
         Name: poc-rds-security-group
 
+  # VPC Endpoints security group
+  vpcEndpointsSg:
+    type: aws:ec2:SecurityGroup
+    properties:
+      vpcId: ${vpc.id}
+      description: Security group for VPC Endpoints
+      ingress:
+        - protocol: tcp
+          fromPort: 443
+          toPort: 443
+          securityGroups:
+            - ${lambdaSg.id}
+          description: Allow HTTPS from Lambda functions
+      egress:
+        - protocol: "-1"
+          fromPort: 0
+          toPort: 0
+          cidrBlocks: ["0.0.0.0/0"]
+      tags:
+        Name: poc-vpc-endpoints-sg
+
   # ==========================================
-  # 3. STORAGE & MESSAGING (S3, SNS, SQS)
+  # 3. VPC ENDPOINTS (Serverless Access)
+  # ==========================================
+  s3VpcEndpoint:
+    type: aws:ec2:VpcEndpoint
+    properties:
+      vpcId: ${vpc.id}
+      serviceName: com.amazonaws.eu-north-1.s3
+      vpcEndpointType: Gateway
+      routeTableIds:
+        - ${privateRt.id}
+      tags:
+        Name: poc-s3-endpoint
+
+  sqsVpcEndpoint:
+    type: aws:ec2:VpcEndpoint
+    properties:
+      vpcId: ${vpc.id}
+      serviceName: com.amazonaws.eu-north-1.sqs
+      vpcEndpointType: Interface
+      subnetIds:
+        - ${privateSubnet1.id}
+        - ${privateSubnet2.id}
+      securityGroupIds:
+        - ${vpcEndpointsSg.id}
+      privateDnsEnabled: true
+      tags:
+        Name: poc-sqs-endpoint
+
+  snsVpcEndpoint:
+    type: aws:ec2:VpcEndpoint
+    properties:
+      vpcId: ${vpc.id}
+      serviceName: com.amazonaws.eu-north-1.sns
+      vpcEndpointType: Interface
+      subnetIds:
+        - ${privateSubnet1.id}
+        - ${privateSubnet2.id}
+      securityGroupIds:
+        - ${vpcEndpointsSg.id}
+      privateDnsEnabled: true
+      tags:
+        Name: poc-sns-endpoint
+
+  # ==========================================
+  # 4. STORAGE & MESSAGING (S3, SNS, SQS)
   # ==========================================
   invoicesBucket:
     type: aws:s3:BucketV2
@@ -277,58 +328,12 @@ resources:
                   aws:SourceArn: ${snsTopic.arn}
 
   # ==========================================
-  # 3b. LOAD BALANCER (ALB + Target Group + Listener)
+  # 5. IAM ROLES (Lambda Service Profile)
   # ==========================================
-
-  # Application Load Balancer spans both public subnets across AZs
-  alb:
-    type: aws:lb:LoadBalancer
-    properties:
-      internal: false
-      loadBalancerType: application
-      securityGroups:
-        - ${albSg.id}
-      subnets:
-        - ${publicSubnet.id}
-        - ${publicSubnet2.id}
-      tags:
-        Name: poc-alb
-
-  # Target group routes ALB traffic to registered EC2 instances on port 80
-  targetGroup:
-    type: aws:lb:TargetGroup
-    properties:
-      port: 80
-      protocol: HTTP
-      vpcId: ${vpc.id}
-      targetType: instance
-      healthCheck:
-        path: /
-        healthyThreshold: 2
-        unhealthyThreshold: 3
-        interval: 30
-        timeout: 10
-      tags:
-        Name: poc-target-group
-
-  # HTTP listener on port 80 forwards to the target group
-  albListener:
-    type: aws:lb:Listener
-    properties:
-      loadBalancerArn: ${alb.arn}
-      port: 80
-      protocol: HTTP
-      defaultActions:
-        - type: forward
-          targetGroupArn: ${targetGroup.arn}
-
-  # ==========================================
-  # 4. IAM ROLES (EC2 Service Profile)
-  # ==========================================
-  ec2Role:
+  lambdaRole:
     type: aws:iam:Role
     properties:
-      name: poc-ec2-role
+      name: poc-lambda-role
       assumeRolePolicy:
         fn::toJSON:
           Version: "2012-10-17"
@@ -336,13 +341,19 @@ resources:
             - Action: sts:AssumeRole
               Effect: Allow
               Principal:
-                Service: ec2.amazonaws.com
+                Service: lambda.amazonaws.com
 
-  ec2RolePolicy:
+  lambdaVpcPolicyAttachment:
+    type: aws:iam:RolePolicyAttachment
+    properties:
+      role: ${lambdaRole.name}
+      policyArn: arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  lambdaRolePolicy:
     type: aws:iam:RolePolicy
     properties:
-      role: ${ec2Role.id}
-      name: poc-ec2-policy
+      role: ${lambdaRole.id}
+      name: poc-lambda-policy
       policy:
         fn::toJSON:
           Version: "2012-10-17"
@@ -369,14 +380,8 @@ resources:
                 - ${invoiceQueue.arn}
                 - ${deliveryQueue.arn}
 
-  ec2InstanceProfile:
-    type: aws:iam:InstanceProfile
-    properties:
-      name: poc-ec2-instance-profile
-      role: ${ec2Role.name}
-
   # ==========================================
-  # 5. DATABASES (PostgreSQL RDS)
+  # 6. DATABASES (PostgreSQL RDS)
   # ==========================================
   rdsSubnetGroup:
     type: aws:rds:SubnetGroup
@@ -402,140 +407,155 @@ resources:
       dbSubnetGroupName: ${rdsSubnetGroup.name}
       vpcSecurityGroupIds:
         - ${rdsSg.id}
-      # Multi-AZ creates a synchronous standby replica in a second AZ.
-      # AWS handles automatic failover (~60-120 s) with no manual intervention.
       multiAz: true
       skipFinalSnapshot: true
       tags:
         Name: poc-postgres-database
 
   # ==========================================
-  # 6. COMPUTE (Auto Scaling Group + Launch Template)
+  # 7. LAMBDA COMPUTE & API GATEWAY
   # ==========================================
-  sshKey:
-    type: aws:ec2:KeyPair
+  apiLambda:
+    type: aws:lambda:Function
     properties:
-      keyName: poc-ssh-key
-      publicKey:
-        fn::readFile: /Users/muhammad/.ssh/id_ed25519_github.pub
+      code: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      functionName: poc-api-lambda
+      role: ${lambdaRole.arn}
+      handler: com.suleman.poc.StreamLambdaHandler::handleRequest
+      runtime: java17
+      timeout: 30
+      memorySize: 1024
+      publish: true
+      snapStart:
+        applyOn: PublishedVersions
+      vpcConfig:
+        subnetIds:
+          - ${privateSubnet1.id}
+          - ${privateSubnet2.id}
+        securityGroupIds:
+          - ${lambdaSg.id}
+      environment:
+        variables:
+          DB_HOST:
+            fn::split:
+              - ":"
+              - ${postgresDb.endpoint}
+            fn::select:
+              - 0
+          DB_PORT: "5432"
+          DB_NAME: postgres
+          DB_USER: dbadmin
+          DB_PASSWORD: ${dbPassword}
+          AWS_REGION: eu-north-1
+          SNS_TOPIC_ARN: ${snsTopic.arn}
+          S3_BUCKET: ${invoicesBucket.id}
 
-  # Launch template defines the instance configuration used by the ASG.
-  # Each instance starts Docker on boot; the application is deployed via
-  # the existing deploy.sh targeting the ALB DNS name.
-  launchTemplate:
-    type: aws:ec2:LaunchTemplate
+  sqsLambda:
+    type: aws:lambda:Function
     properties:
-      imageId:
-        fn::invoke:
-          function: aws:ec2:getAmi
-          arguments:
-            mostRecent: true
-            filters:
-              - name: name
-                values:
-                  ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
-              - name: virtualization-type
-                values: ["hvm"]
-            owners: ["099720109477"]
-          return: id
-      instanceType: t3.micro
-      keyName: ${sshKey.keyName}
-      iamInstanceProfile:
-        name: ${ec2InstanceProfile.name}
-      vpcSecurityGroupIds:
-        - ${ec2Sg.id}
-      # userData must be base64-encoded for LaunchTemplates
-      userData:
-        fn::toBase64: |
-          #!/bin/bash
-          apt-get update -y
-          apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-          add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-          apt-get update -y
-          apt-get install -y docker-ce
-          systemctl start docker
-          systemctl enable docker
-      tags:
-        Name: poc-launch-template
+      code: ../app/target/cloud-infra-poc-0.0.1-SNAPSHOT.jar
+      functionName: poc-sqs-lambda
+      role: ${lambdaRole.arn}
+      handler: com.suleman.poc.SqsLambdaHandler::handleRequest
+      runtime: java17
+      timeout: 30
+      memorySize: 1024
+      publish: true
+      snapStart:
+        applyOn: PublishedVersions
+      vpcConfig:
+        subnetIds:
+          - ${privateSubnet1.id}
+          - ${privateSubnet2.id}
+        securityGroupIds:
+          - ${lambdaSg.id}
+      environment:
+        variables:
+          DB_HOST:
+            fn::split:
+              - ":"
+              - ${postgresDb.endpoint}
+            fn::select:
+              - 0
+          DB_PORT: "5432"
+          DB_NAME: postgres
+          DB_USER: dbadmin
+          DB_PASSWORD: ${dbPassword}
+          AWS_REGION: eu-north-1
+          SNS_TOPIC_ARN: ${snsTopic.arn}
+          S3_BUCKET: ${invoicesBucket.id}
 
-  # Auto Scaling Group: runs 1–3 instances across both public subnets.
-  # Registers instances with the ALB target group automatically.
-  asg:
-    type: aws:autoscaling:Group
+  # SQS Trigger mappings
+  notificationTrigger:
+    type: aws:lambda:EventSourceMapping
     properties:
-      minSize: 1
-      maxSize: 3
-      desiredCapacity: 1
-      launchTemplate:
-        id: ${launchTemplate.id}
-        version: $Latest
-      vpcZoneIdentifiers:
-        - ${publicSubnet.id}
-        - ${publicSubnet2.id}
-      targetGroupArns:
-        - ${targetGroup.arn}
-      # Use ELB health checks so unhealthy instances are replaced automatically
-      healthCheckType: ELB
-      healthCheckGracePeriod: 300
-      tags:
-        - key: Name
-          value: poc-asg-instance
-          propagateAtLaunch: true
+      eventSourceArn: ${notificationQueue.arn}
+      functionName: ${sqsLambda.arn}
 
-  # Scale out: add one instance when average CPU >= 70% for two periods
-  scaleOutPolicy:
-    type: aws:autoscaling:Policy
+  invoiceTrigger:
+    type: aws:lambda:EventSourceMapping
     properties:
-      autoscalingGroupName: ${asg.name}
-      adjustmentType: ChangeInCapacity
-      scalingAdjustment: 1
-      cooldown: 300
+      eventSourceArn: ${invoiceQueue.arn}
+      functionName: ${sqsLambda.arn}
 
-  # Scale in: remove one instance when average CPU <= 30% for two periods
-  scaleInPolicy:
-    type: aws:autoscaling:Policy
+  deliveryTrigger:
+    type: aws:lambda:EventSourceMapping
     properties:
-      autoscalingGroupName: ${asg.name}
-      adjustmentType: ChangeInCapacity
-      scalingAdjustment: -1
-      cooldown: 300
+      eventSourceArn: ${deliveryQueue.arn}
+      functionName: ${sqsLambda.arn}
 
-  cpuHighAlarm:
-    type: aws:cloudwatch:MetricAlarm
+  # API Gateway HTTP API
+  apiGateway:
+    type: aws:apigatewayv2:Api
     properties:
-      comparisonOperator: GreaterThanOrEqualToThreshold
-      evaluationPeriods: 2
-      metricName: CPUUtilization
-      namespace: AWS/EC2
-      period: 120
-      statistic: Average
-      threshold: 70
-      dimensions:
-        AutoScalingGroupName: ${asg.name}
-      alarmActions:
-        - ${scaleOutPolicy.arn}
-      tags:
-        Name: poc-cpu-high-alarm
+      name: poc-api-gateway
+      protocolType: HTTP
 
-  cpuLowAlarm:
-    type: aws:cloudwatch:MetricAlarm
+  apiGatewayIntegration:
+    type: aws:apigatewayv2:Integration
     properties:
-      comparisonOperator: LessThanOrEqualToThreshold
-      evaluationPeriods: 2
-      metricName: CPUUtilization
-      namespace: AWS/EC2
-      period: 120
-      statistic: Average
-      threshold: 30
-      dimensions:
-        AutoScalingGroupName: ${asg.name}
-      alarmActions:
-        - ${scaleInPolicy.arn}
-      tags:
-        Name: poc-cpu-low-alarm
+      apiId: ${apiGateway.id}
+      integrationType: AWS_PROXY
+      integrationUri: ${apiLambda.qualifiedArn}
+      payloadFormatVersion: "2.0"
+
+  apiGatewayRouteAny:
+    type: aws:apigatewayv2:Route
+    properties:
+      apiId: ${apiGateway.id}
+      routeKey: "ANY /{proxy+}"
+      target: integrations/${apiGatewayIntegration.id}
+
+  apiGatewayRouteRoot:
+    type: aws:apigatewayv2:Route
+    properties:
+      apiId: ${apiGateway.id}
+      routeKey: "ANY /"
+      target: integrations/${apiGatewayIntegration.id}
+
+  apiGatewayStage:
+    type: aws:apigatewayv2:Stage
+    properties:
+      apiId: ${apiGateway.id}
+      name: $default
+      autoDeploy: true
+
+  lambdaPermission:
+    type: aws:lambda:Permission
+    properties:
+      action: lambda:InvokeFunction
+      function: ${apiLambda.name}
+      principal: apigateway.amazonaws.com
+      sourceArn: ${apiGateway.executionArn}/*/*
+
+  lambdaPermissionQualified:
+    type: aws:lambda:Permission
+    properties:
+      action: lambda:InvokeFunction
+      function: ${apiLambda.qualifiedArn}
+      principal: apigateway.amazonaws.com
+      sourceArn: ${apiGateway.executionArn}/*/*
 
 outputs:
-  alb_dns: ${alb.dnsName}
-  alb_url: http://${alb.dnsName}
+  api_gateway_url: ${apiGatewayStage.invokeUrl}
   rds_endpoint: ${postgresDb.endpoint}

@@ -1,34 +1,10 @@
-# --- EC2 Instance Security Group ---
-resource "aws_security_group" "ec2" {
-  name        = "poc-ec2-sg"
-  description = "Allow HTTP and SSH access to EC2 app server"
+# --- Lambda Security Group ---
+resource "aws_security_group" "lambda" {
+  name        = "poc-lambda-sg"
+  description = "Security group for Lambda functions"
   vpc_id      = aws_vpc.main.id
 
-  # Allow inbound HTTP from anywhere
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Allow inbound Spring Boot port 8080 directly (optional but useful for PoC testing)
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Allow inbound SSH restricted by variable (default anywhere for testing, but can lock down)
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.my_ip]
-  }
-
-  # Allow all outbound traffic (so EC2 can install packages, download Docker images)
+  # Allow all outbound traffic (so Lambda can connect to RDS, S3, SQS, SNS)
   egress {
     from_port   = 0
     to_port     = 0
@@ -37,25 +13,25 @@ resource "aws_security_group" "ec2" {
   }
 
   tags = {
-    Name = "poc-ec2-sg"
+    Name = "poc-lambda-sg"
   }
 }
 
 # --- RDS Security Group ---
 resource "aws_security_group" "rds" {
   name        = "poc-rds-sg"
-  description = "Allow PostgreSQL database access from EC2 instance only"
+  description = "Allow PostgreSQL database access from Lambda functions"
   vpc_id      = aws_vpc.main.id
 
-  # Allow PostgreSQL traffic from the EC2 security group ONLY
+  # Allow PostgreSQL traffic from the Lambda security group ONLY
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.ec2.id]
+    security_groups = [aws_security_group.lambda.id]
   }
 
-  # Allow all outbound traffic (default, but can lock down if required)
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -65,5 +41,31 @@ resource "aws_security_group" "rds" {
 
   tags = {
     Name = "poc-rds-sg"
+  }
+}
+
+# --- VPC Endpoints Security Group ---
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "poc-vpc-endpoints-sg"
+  description = "Security group for VPC Endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  # Allow HTTPS traffic from Lambda functions inside the VPC
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "poc-vpc-endpoints-sg"
   }
 }

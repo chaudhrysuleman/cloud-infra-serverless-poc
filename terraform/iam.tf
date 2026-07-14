@@ -1,22 +1,29 @@
-# --- Trust Policy for EC2 Service ---
-data "aws_iam_policy_document" "ec2_assume_role" {
+# --- Trust Policy for Lambda Service ---
+data "aws_iam_policy_document" "lambda_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
     principals {
       type        = "Service"
-      identifiers = ["ec2.amazonaws.com"]
+      identifiers = ["lambda.amazonaws.com"]
     }
   }
 }
 
-# --- IAM Role for EC2 Instance ---
-resource "aws_iam_role" "ec2" {
-  name               = "poc-ec2-role"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+# --- IAM Role for Lambda Functions ---
+resource "aws_iam_role" "lambda" {
+  name               = "poc-lambda-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+# --- Attach AWSLambdaVPCAccessExecutionRole Managed Policy ---
+# This permits Lambda functions running inside a VPC to manage Network Interfaces (create, delete, list).
+resource "aws_iam_role_policy_attachment" "lambda_vpc" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
 # --- Inline Policies for S3, SNS, SQS permissions ---
-data "aws_iam_policy_document" "ec2_permissions" {
+data "aws_iam_policy_document" "lambda_permissions" {
   # S3 Permission (Read/Write to invoices bucket)
   statement {
     effect    = "Allow"
@@ -51,14 +58,8 @@ data "aws_iam_policy_document" "ec2_permissions" {
   }
 }
 
-resource "aws_iam_role_policy" "ec2" {
-  name   = "poc-ec2-policy"
-  role   = aws_iam_role.ec2.id
-  policy = data.aws_iam_policy_document.ec2_permissions.json
-}
-
-# --- IAM Instance Profile for EC2 ---
-resource "aws_iam_instance_profile" "ec2" {
-  name = "poc-ec2-instance-profile"
-  role = aws_iam_role.ec2.name
+resource "aws_iam_role_policy" "lambda" {
+  name   = "poc-lambda-policy"
+  role   = aws_iam_role.lambda.id
+  policy = data.aws_iam_policy_document.lambda_permissions.json
 }
