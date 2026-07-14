@@ -6,6 +6,8 @@ This project is a complete event-driven **Parcels Order System** (simulating the
 
 ## 🏗️ High-Level Serverless Architecture
 
+![Serverless Cloud Architecture](architecture-diagram.png)
+
 The system utilizes a fully serverless approach:
 - **API Gateway (HTTP API)** as the single public entrypoint routing REST requests into the REST API Lambda.
 - **AWS Lambda (Java 17)** split into:
