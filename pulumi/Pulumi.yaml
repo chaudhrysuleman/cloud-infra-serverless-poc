@@ -235,6 +235,13 @@ resources:
       ignorePublicAcls: true
       restrictPublicBuckets: true
 
+  invoicesBucketVersioning:
+    type: aws:s3:BucketVersioningV2
+    properties:
+      bucket: ${invoicesBucket.id}
+      versioningConfiguration:
+        status: Enabled
+
   lambdaJar:
     type: aws:s3:BucketObjectv2
     properties:
@@ -415,7 +422,7 @@ resources:
       dbSubnetGroupName: ${rdsSubnetGroup.name}
       vpcSecurityGroupIds:
         - ${rdsSg.id}
-      multiAz: true
+      multiAz: false
       skipFinalSnapshot: true
       tags:
         Name: poc-postgres-database
@@ -428,6 +435,7 @@ resources:
     properties:
       s3Bucket: ${invoicesBucket.id}
       s3Key: ${lambdaJar.key}
+      s3ObjectVersion: ${lambdaJar.versionId}
       name: poc-api-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.StreamLambdaHandler::handleRequest
@@ -453,12 +461,12 @@ resources:
           SNS_TOPIC_ARN: ${snsTopic.arn}
           S3_BUCKET: ${invoicesBucket.id}
 
-
   sqsLambda:
     type: aws:lambda:Function
     properties:
       s3Bucket: ${invoicesBucket.id}
       s3Key: ${lambdaJar.key}
+      s3ObjectVersion: ${lambdaJar.versionId}
       name: poc-sqs-lambda
       role: ${lambdaRole.arn}
       handler: com.suleman.poc.SqsLambdaHandler::handleRequest
@@ -515,7 +523,7 @@ resources:
     properties:
       apiId: ${apiGateway.id}
       integrationType: AWS_PROXY
-      integrationUri: ${apiLambda.qualifiedArn}
+      integrationUri: ${apiLambda.qualifiedInvokeArn}
       payloadFormatVersion: "1.0"
 
   apiGatewayRouteAny:

@@ -182,7 +182,7 @@ resource "aws_apigatewayv2_stage" "lambda" {
 resource "aws_apigatewayv2_integration" "lambda" {
   api_id                 = aws_apigatewayv2_api.lambda.id
   integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.api.qualified_arn
+  integration_uri        = aws_lambda_function.api.qualified_invoke_arn
   payload_format_version = "1.0"
 }
 
