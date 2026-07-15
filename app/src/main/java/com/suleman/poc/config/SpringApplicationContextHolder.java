@@ -11,9 +11,13 @@ public class SpringApplicationContextHolder {
 
     public static synchronized ApplicationContext get() {
         if (context == null) {
-            SpringApplication app = new SpringApplication(Application.class);
-            app.setWebApplicationType(WebApplicationType.NONE);
-            context = app.run();
+            try {
+                SpringApplication app = new SpringApplication(Application.class);
+                context = app.run();
+            } catch (Exception e) {
+                context = null;
+                throw e;
+            }
         }
         return context;
     }
